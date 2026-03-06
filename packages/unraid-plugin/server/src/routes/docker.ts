@@ -165,13 +165,10 @@ export function registerDockerRoutes(app: FastifyInstance, gql: GraphQLClient): 
       // Add Unraid managed labels so container appears as first-class citizen in UI
       const allLabels: Record<string, string> = {
         "net.unraid.docker.managed": "dockerman",
-        ...(icon ? { "net.unraid.docker.icon": icon } : {}),
-        ...(webui ? { "net.unraid.docker.webui": webui } : {}),
-        ...labels,
       };
-      for (const [k, v] of Object.entries(allLabels)) {
-        args.push("--label", `${k}=${v}`);
-      }
+      if (icon) allLabels["net.unraid.docker.icon"] = icon;
+      if (webui) allLabels["net.unraid.docker.webui"] = webui;
+      for (const [k, v] of Object.entries(labels)) allLabels[k] = v;
 
       args.push(image);
 
