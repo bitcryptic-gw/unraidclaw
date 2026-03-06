@@ -3,6 +3,8 @@ import { Resource, Action } from "@unraidclaw/shared";
 import type { DockerContainer, DockerContainerDetail, DockerActionResponse, DockerLogsResponse } from "@unraidclaw/shared";
 import type { GraphQLClient } from "../graphql-client.js";
 import { requirePermission } from "../permissions.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 const LIST_QUERY = `query {
   docker {
@@ -38,6 +40,18 @@ const LOGS_QUERY = `query ($id: String!, $tail: Int, $since: String) {
     containerLogs(id: $id, tail: $tail, since: $since)
   }
 }`;
+
+const execFileAsync = promisify(execFile);
+
+interface DockerCreateBody {
+  image: string;
+  name?: string;
+  ports?: string[];
+  volumes?: string[];
+  env?: string[];
+  restart?: "no" | "always" | "unless-stopped" | "on-failure";
+  network?: string;
+}
 
 function actionMutation(action: string): string {
   return `mutation ($id: String!) {
@@ -114,6 +128,41 @@ export function registerDockerRoutes(app: FastifyInstance, gql: GraphQLClient): 
         { id: req.params.id }
       );
       return reply.send({ ok: true, data: data.docker.remove });
+    },
+  });
+
+  // Create container
+  app.post<{ Body: DockerCreateBody }>("/api/docker/containers", {
+    preHandler: requirePermission(Resource.DOCKER, Action.CREATE),
+    handler: async (req, reply) => {
+      const {
+        image,
+        name,
+        ports = [],
+        volumes = [],
+        env = [],
+        restart,
+        network,
+      } = req.body;
+
+      const args = ["run", "-d"];
+      if (name) args.push("--name", name);
+      if (restart) args.push("--restart", restart);
+      if (network) args.push("--network", network);
+      for (const p of ports) args.push("-p", p);
+      for (const v of volumes) args.push("-v", v);
+      for (const e of env) args.push("-e", e);
+      args.push(image);
+
+      try {
+        const { stdout } = await execFileAsync("docker", args);
+        return reply.send({ ok: true, data: { id: stdout.trim() } });
+      } catch (err: any) {
+        return reply.status(500).send({
+          ok: false,
+          error: { code: "DOCKER_CREATE_FAILED", message: err.stderr ?? err.message },
+        });
+      }
     },
   });
 }
